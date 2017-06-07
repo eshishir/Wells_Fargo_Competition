@@ -1,0 +1,728 @@
+---
+title: "Wells Fargo Competition"
+subtitle: "Identify which outreach methods & channels yield the best product portfolio"
+author: "Shishir Shirbhate"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  pdf_document: 
+    toc: yes
+---
+
+\newpage
+# 1. Load Libraries
+
+```{r, message=FALSE, warning=FALSE,results='hide'}
+suppressPackageStartupMessages({
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(rpart)
+library(caret)
+library(e1071)
+library(pscl)
+library(reshape)
+library(plm)
+library(gplots)
+library(fields)
+library(arules)
+library(arulesViz)
+library(gridExtra)
+library(MASS)
+library(reshape2)
+library(coefplot)
+})
+```
+
+# 2. Data Insertion & summarization
+
+```{r}
+
+file_path <- "C:/MS Material/Competitions/Wells Fargo/Campus Challenge.csv"
+
+bank_data = read.table(file=file_path, header=TRUE, sep = ",")
+
+head(bank_data)
+summary(bank_data)
+describe(bank_data)
+
+```
+
+# 3. Data Wrangling & Feature Engineering
+
+```{r}
+
+bank_data$portfolio <- bank_data$typeA_ct + bank_data$typeB_ct + 
+  bank_data$typeC_flag + bank_data$typeD_flag + bank_data$typeE_flag + bank_data$typeF_flag + bank_data$typeG_flag
+
+# Find change in balance from previous month
+setDT(bank_data)[,balance_change:=bank_data$normal_tot_bal-shift(bank_data$normal_tot_bal,1,type="lag")]
+
+bank_data$balance_change[which(bank_data$month == 1)] <- 0
+
+# Find change in portfolio from previous month
+setDT(bank_data)[,portfolio_change:=bank_data$portfolio-shift(bank_data$portfolio,1,type="lag")]
+
+bank_data$portfolio_change[which(bank_data$month == 1)] <- 0
+
+# Flag increase / decrease in balance
+bank_data$balance_change_flag <- NA
+bank_data$balance_change_flag[which(bank_data$balance_change < 0)] <- 0
+bank_data$balance_change_flag[which(bank_data$balance_change > 0)] <- 1
+bank_data$balance_change_flag[which(bank_data$balance_change == 0)] <- 0
+
+# Flag increase / decrease in portfolio
+bank_data$portfolio_change_flag <- NA
+bank_data$portfolio_change_flag[which(bank_data$portfolio_change < 0)] <- 0
+bank_data$portfolio_change_flag[which(bank_data$portfolio_change > 0)] <- 1
+bank_data$portfolio_change_flag[which(bank_data$portfolio_change == 0)] <- 0
+
+# Customer Outreaches changes and flags
+
+setDT(bank_data)[,cust_outreach_ai_change:=bank_data$cust_outreach_ai -
+                   shift(bank_data$cust_outreach_ai,1,type="lag")]
+bank_data$cust_outreach_ai_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_ai_flag <- NA
+bank_data$cust_outreach_ai_flag[which(bank_data$cust_outreach_ai_change < 0)] <- 0
+bank_data$cust_outreach_ai_flag[which(bank_data$cust_outreach_ai_change > 0)] <- 1
+bank_data$cust_outreach_ai_flag[which(bank_data$cust_outreach_ai_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_aii_change:=bank_data$cust_outreach_aii -
+                   shift(bank_data$cust_outreach_aii,1,type="lag")]
+bank_data$cust_outreach_aii_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_aii_flag <- NA
+bank_data$cust_outreach_aii_flag[which(bank_data$cust_outreach_aii_change < 0)] <- 0
+bank_data$cust_outreach_aii_flag[which(bank_data$cust_outreach_aii_change > 0)] <- 1
+bank_data$cust_outreach_aii_flag[which(bank_data$cust_outreach_aii_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_aiii_change:=bank_data$cust_outreach_aiii -
+                   shift(bank_data$cust_outreach_aiii,1,type="lag")]
+bank_data$cust_outreach_aiii_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_aiii_flag <- NA
+bank_data$cust_outreach_aiii_flag[which(bank_data$cust_outreach_aiii_change < 0)] <- 0
+bank_data$cust_outreach_aiii_flag[which(bank_data$cust_outreach_aiii_change > 0)] <- 1
+bank_data$cust_outreach_aiii_flag[which(bank_data$cust_outreach_aiii_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_aiv_change:=bank_data$cust_outreach_aiv -
+                   shift(bank_data$cust_outreach_aiv,1,type="lag")]
+bank_data$cust_outreach_aiv_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_aiv_flag <- NA
+bank_data$cust_outreach_aiv_flag[which(bank_data$cust_outreach_aiv_change < 0)] <- 0
+bank_data$cust_outreach_aiv_flag[which(bank_data$cust_outreach_aiv_change > 0)] <- 1
+bank_data$cust_outreach_aiv_flag[which(bank_data$cust_outreach_aiv_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_av_change:=bank_data$cust_outreach_av -
+                   shift(bank_data$cust_outreach_av,1,type="lag")]
+bank_data$cust_outreach_av_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_av_flag <- NA
+bank_data$cust_outreach_av_flag[which(bank_data$cust_outreach_av_change < 0)] <- 0
+bank_data$cust_outreach_av_flag[which(bank_data$cust_outreach_av_change > 0)] <- 1
+bank_data$cust_outreach_av_flag[which(bank_data$cust_outreach_av_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_avi_change:=bank_data$cust_outreach_avi -
+                   shift(bank_data$cust_outreach_avi,1,type="lag")]
+bank_data$cust_outreach_avi_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_avi_flag <- NA
+bank_data$cust_outreach_avi_flag[which(bank_data$cust_outreach_avi_change < 0)] <- 0
+bank_data$cust_outreach_avi_flag[which(bank_data$cust_outreach_avi_change > 0)] <- 1
+bank_data$cust_outreach_avi_flag[which(bank_data$cust_outreach_avi_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_avii_change:=bank_data$cust_outreach_avii -
+                   shift(bank_data$cust_outreach_avii,1,type="lag")]
+bank_data$cust_outreach_avii_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_avii_flag <- NA
+bank_data$cust_outreach_avii_flag[which(bank_data$cust_outreach_avii_change < 0)] <- 0
+bank_data$cust_outreach_avii_flag[which(bank_data$cust_outreach_avii_change > 0)] <- 1
+bank_data$cust_outreach_avii_flag[which(bank_data$cust_outreach_avii_change == 0)] <- 0
+
+setDT(bank_data)[,cust_outreach_aviii_change:=bank_data$cust_outreach_aviii -
+                   shift(bank_data$cust_outreach_aviii,1,type="lag")]
+bank_data$cust_outreach_aviii_change[which(bank_data$month == 1)] <- 0
+bank_data$cust_outreach_aviii_flag <- NA
+bank_data$cust_outreach_aviii_flag[which(bank_data$cust_outreach_aviii_change < 0)] <- 0
+bank_data$cust_outreach_aviii_flag[which(bank_data$cust_outreach_aviii_change > 0)] <- 1
+bank_data$cust_outreach_aviii_flag[which(bank_data$cust_outreach_aviii_change == 0)] <- 0
+
+bank_data$binary_channels <- paste(bank_data$wf_outreach_flag_chan_i,
+                                   bank_data$wf_outreach_flag_chan_ii,
+                                   bank_data$wf_outreach_flag_chan_iv,sep="")
+bank_data$demo_combo <- paste(bank_data$cust_demographics_ai,bank_data$cust_demographics_aii,sep="")
+
+
+bank_data$channel_combination <- strtoi(bank_data$binary_channels,base=2)
+
+```
+
+# 3. Change data types
+
+```{r}
+
+bank_data$cust_demographics_ai <- as.factor(bank_data$cust_demographics_ai)
+bank_data$cust_demographics_aii <- as.factor(bank_data$cust_demographics_aii)
+
+bank_data$channel_combinationF <- as.factor(bank_data$channel_combination)
+
+bank_data$monthF <- as.factor(bank_data$month)
+
+bank_data$typeA_bal_cat <- as.factor(bank_data$typeA_bal_cat)
+bank_data$typeB_bal_cat <- as.factor(bank_data$typeB_bal_cat)
+bank_data$typeC_bal_cat <- as.factor(bank_data$typeC_bal_cat)
+bank_data$typeD_bal_cat <- as.factor(bank_data$typeD_bal_cat)
+bank_data$typeE_bal_cat <- as.factor(bank_data$typeE_bal_cat)
+
+```
+
+# 4. Data Exploration
+
+```{r}
+
+ggplot(bank_data, aes(x=portfolio)) + 
+  geom_bar(color="blue",fill="blue") + 
+  xlab("Portfolio")+  
+  scale_x_continuous(breaks = seq(0,max(bank_data$portfolio),1)) +
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+# Check if first bar can be made of different color
+portfolio_channel <- ggplot(bank_data, aes(x=channel_combination,y=portfolio_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="blue") + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  xlab("Channel Combinations") +
+  ylab("Avg no. of Portfolio Increases") + 
+  scale_x_continuous(breaks = seq(0,7,1)) + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+balance_channel <- ggplot(bank_data, aes(x=channel_combination,y=balance_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="white") + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  xlab("Channel Combinations") +
+  ylab("Avg no. of times Balance Increases") + 
+  scale_x_continuous(breaks = seq(0,7,1)) + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+portfolio_demo_A <- ggplot(bank_data, aes(x=cust_demographics_ai,y=portfolio_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="blue") + 
+  stat_summary(fun.y="mean", geom="bar") +
+  xlab("Demographics Type A") +
+  ylab("Avg no. of Portfolio Increases") + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+balance_demo_A <- ggplot(bank_data, aes(x=cust_demographics_ai,y=balance_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="white") + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  xlab("Demographics Type A") +
+  ylab("Avg no. of times Balance Increases") + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+portfolio_demo_B <- ggplot(bank_data, aes(x=cust_demographics_aii,y=portfolio_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="blue") + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  xlab("Demographics Type B") +
+  ylab("Avg no. of Portfolio Increases") + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+balance_demo_B <- ggplot(bank_data, aes(x=cust_demographics_aii,y=balance_change_flag)) + 
+  geom_bar(stat="identity",color="blue",fill="white") + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  xlab("Demographics Type B") + 
+  ylab("Avg no. of times Balance Increases") + 
+  theme(axis.title.x = element_text(face="bold", size=16),axis.text.x  = element_text(angle=0, vjust=0.5, size=16)) + 
+  theme(axis.title.y = element_text(face="bold", size=16),axis.text.y  = element_text(angle=0, vjust=0.5, size=16))
+
+#multiple graphs on one panel
+grid.arrange(portfolio_channel,portfolio_demo_A,portfolio_demo_B,balance_channel,balance_demo_A,balance_demo_B, ncol=3)
+
+```
+
+# 5. Check Association between portfolio change and customer outreaches change
+
+```{r}
+
+association_data <- subset(bank_data,select=c("portfolio_change_flag",
+                                "cust_outreach_ai_flag",
+                                "cust_outreach_aii_flag",
+                                "cust_outreach_aiii_flag",
+                                "cust_outreach_aiv_flag",
+                                "cust_outreach_av_flag",
+                                "cust_outreach_avi_flag",
+                                "cust_outreach_avii_flag",
+                                "cust_outreach_aviii_flag",
+                                "wf_outreach_flag_chan_i",
+                                "wf_outreach_flag_chan_ii",
+                                "wf_outreach_flag_chan_iv"))
+
+transaction <- as(data.matrix(association_data), "transactions")
+
+itemFrequencyPlot(transaction,topN=20,type="absolute")
+
+rules <- apriori(data = transaction, parameter = list(support = 0.001, confidence = 0.005))
+
+rules <- sort(rules,by="confidence",decreasing=TRUE)
+
+#inspect(rules[1:3])
+
+rules_subset <- subset(rules, subset = rhs %pin% "portfolio_change_flag" & lift > 0)[1:3]
+  
+inspect(rules_subset)
+
+plot(rules_subset)
+
+# Confidence - This is the primary mode of sorting since we want to know out of all balance increases
+# which combinations of outreaches & channels occur the most frequently
+
+# Support - We have put a cut-off of 10% of actual proportion of portfolio changes
+
+# Lift - Combinations of <> outreaches and channels are <>% more likely to have balance increases
+
+```
+
+# 6. Check Association between balance change and customer outreaches change
+
+```{r}
+
+association_data <- subset(bank_data,select=c("balance_change_flag",
+                                              "cust_outreach_ai_flag",
+                                              "cust_outreach_aii_flag",
+                                              "cust_outreach_aiii_flag",
+                                              "cust_outreach_aiv_flag",
+                                              "cust_outreach_av_flag",
+                                              "cust_outreach_avi_flag",
+                                              "cust_outreach_avii_flag",
+                                              "cust_outreach_aviii_flag",
+                                              "wf_outreach_flag_chan_i",
+                                              "wf_outreach_flag_chan_ii",
+                                              "wf_outreach_flag_chan_iv"))
+
+transaction <- as(data.matrix(association_data), "transactions")
+
+itemFrequencyPlot(transaction,topN=20,type="absolute")
+
+rules <- apriori(data = transaction, parameter = list(support = 0.05, confidence = 0.005))
+
+rules <- sort(rules,by="confidence",decreasing=TRUE)
+
+rules_subset <- subset(rules, subset = rhs %pin% "balance_change_flag" & lift > 0)[1:3]
+
+inspect(rules_subset)
+
+plot(rules_subset)
+plot(rules_subset,method="graph")
+plot(rules_subset,method="grouped")
+
+# Confidence - This is the primary mode of sorting since we want to know out of all balance increases
+# which combinations of outreaches & channels occur most frequently
+
+# Support - We have put a cut-off of 10% of actual proportion of balance changes
+
+# Lift - Combinations of <> outreaches and channels are <>% more likely to have balance increases
+
+```
+
+# 7. Finding correlations of various outreach programs with portfolio
+
+```{r}
+
+demo1_portfolio <- data.frame(matrix(nrow=8,ncol=6))
+colnames(demo1_portfolio) <- c("0","1","2","3","4","5")
+
+for (i in 1:length(unique(bank_data$cust_demographics_ai)))
+{
+  bank_data1 <- bank_data[bank_data$cust_demographics_ai == i-1]
+  for (j in 1:nrow(demo1_portfolio))
+  {
+    if (j == 1)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_ai),2)
+    }else if(j==2)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aii),2)
+    }else if(j==3)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aiii),2)
+    }else if(j==4)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aiv),2)
+    }else if(j==5)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_av),2)
+    }else if(j==6)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_avi),2)
+    }else if(j==7)
+    {
+      demo1_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_avii),2)
+    }else
+    {
+      demo1_portfolio[[i]][j]<- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aviii),2)
+    }
+  }
+}
+
+demo2_portfolio <- data.frame(matrix(nrow=8,ncol=5))
+colnames(demo2_portfolio) <- c("1","2","3","4","5")
+
+for (i in 1:length(unique(bank_data$cust_demographics_aii)))
+{
+  bank_data1 <- bank_data[bank_data$cust_demographics_aii == i]
+  for (j in 1:nrow(demo2_portfolio))
+  {
+    if (j == 1)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_ai),2)
+    }else if(j==2)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aii),2)
+    }else if(j==3)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aiii),2)
+    }else if(j==4)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aiv),2)
+    }else if(j==5)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_av),2)
+    }else if(j==6)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_avi),2)
+    }else if(j==7)
+    {
+      demo2_portfolio[[i]][j] <- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_avii),2)
+    }else
+    {
+      demo2_portfolio[[i]][j]<- round(cor(bank_data1$portfolio,bank_data1$cust_outreach_aviii),2)
+    }
+  }
+}
+
+demo1_bal <- data.frame(matrix(nrow=8,ncol=6))
+colnames(demo1_bal) <- c("0","1","2","3","4","5")
+
+for (i in 1:length(unique(bank_data$cust_demographics_ai)))
+{
+  bank_data1 <- bank_data[bank_data$cust_demographics_ai == i-1]
+  for (j in 1:nrow(demo1_bal))
+  {
+    if (j == 1)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_ai),2)
+    }else if(j==2)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aii),2)
+    }else if(j==3)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aiii),2)
+    }else if(j==4)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aiv),2)
+    }else if(j==5)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_av),2)
+    }else if(j==6)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_avi),2)
+    }else if(j==7)
+    {
+      demo1_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_avii),2)
+    }else
+    {
+      demo1_bal[[i]][j]<- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aviii),2)
+    }
+  }
+}
+
+demo2_bal <- data.frame(matrix(nrow=8,ncol=5))
+colnames(demo2_bal) <- c("1","2","3","4","5")
+
+for (i in 1:length(unique(bank_data$cust_demographics_aii)))
+{
+  bank_data1 <- bank_data[bank_data$cust_demographics_aii == i]
+  for (j in 1:nrow(demo2_bal))
+  {
+    if (j == 1)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_ai),2)
+    }else if(j==2)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aii),2)
+    }else if(j==3)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aiii),2)
+    }else if(j==4)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aiv),2)
+    }else if(j==5)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_av),2)
+    }else if(j==6)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_avi),2)
+    }else if(j==7)
+    {
+      demo2_bal[[i]][j] <- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_avii),2)
+    }else
+    {
+      demo2_bal[[i]][j]<- round(cor(bank_data1$normal_tot_bal,bank_data1$cust_outreach_aviii),2)
+    }
+  }
+}
+
+# Demographics A - Portfolio
+image(as.matrix(demo1_portfolio),axes=F)
+mtext(text=c(1:nrow(demo1_portfolio)), side=1, line=0.3, at=seq(0,1,1/(nrow(demo1_portfolio)-1)), las=1, cex=0.8)
+mtext(text=c(0:(ncol(demo1_portfolio)-1)), side=2, line=0.3, at=seq(0,1,1/(ncol(demo1_portfolio)-1)), las=1, cex=0.8)
+for (x in 1:nrow(demo1_portfolio))
+  for (y in 1:ncol(demo1_portfolio))
+    text((x-1)/(nrow(demo1_portfolio)-1), (y-1)/(ncol(demo1_portfolio)-1), 
+         sprintf("%0.2f", demo1_portfolio[x,y]))
+
+# Demographics A - Balance
+image(as.matrix(demo1_bal),axes=F)
+mtext(text=c(1:nrow(demo1_bal)), side=1, line=0.3, at=seq(0,1,1/(nrow(demo1_bal)-1)), las=1, cex=0.8)
+mtext(text=c(0:(ncol(demo1_bal)-1)), side=2, line=0.3, at=seq(0,1,1/(ncol(demo1_bal)-1)), las=1, cex=0.8)
+for (x in 1:nrow(demo1_bal))
+  for (y in 1:ncol(demo1_bal))
+    text((x-1)/(nrow(demo1_bal)-1), (y-1)/(ncol(demo1_bal)-1), 
+         sprintf("%0.2f", demo1_bal[x,y]))
+
+# Demographics B - Portfolio
+image(as.matrix(demo2_portfolio),axes=F)
+mtext(text=c(1:nrow(demo2_portfolio)), side=1, line=0.3, at=seq(0,1,1/(nrow(demo2_portfolio)-1)), las=1, cex=0.8)
+mtext(text=c(1:ncol(demo2_portfolio)), side=2, line=0.3, at=seq(0,1,1/(ncol(demo2_portfolio)-1)), las=1, cex=0.8)
+for (x in 1:nrow(demo2_portfolio))
+  for (y in 1:ncol(demo2_portfolio))
+    text((x-1)/(nrow(demo2_portfolio)-1), (y-1)/(ncol(demo2_portfolio)-1), 
+         sprintf("%0.2f", demo2_portfolio[x,y]))
+
+
+# Demographics B - Balance
+image(as.matrix(demo2_bal),axes=F)
+mtext(text=c(1:nrow(demo2_bal)), side=1, line=0.3, at=seq(0,1,1/(nrow(demo2_bal)-1)), las=1, cex=0.8)
+mtext(text=c(1:ncol(demo2_bal)), side=2, line=0.3, at=seq(0,1,1/(ncol(demo2_bal)-1)), las=1, cex=0.8)
+for (x in 1:nrow(demo2_bal))
+  for (y in 1:ncol(demo2_bal))
+    text((x-1)/(nrow(demo2_bal)-1), (y-1)/(ncol(demo2_bal)-1), 
+         sprintf("%0.2f", demo2_bal[x,y]))
+
+# image.plot(as.matrix(demo2_bal),axes=F)
+
+```
+
+# 8. Modeling
+
+```{r}
+
+#Create model to predict change in total balance -- find which methods increase balance!
+balance_model<-lm(balance_change~month+cust_outreach_ai+
+                    cust_outreach_aiii, data=bank_data)
+
+#Create model to predict change in portfolio
+portfolio_model<-lm(portfolio_change~ month + cust_demographics_ai + 
+                      cust_demographics_aii + typeA_ct + typeB_ct + typeA_bal_cat + 
+                      typeC_bal_cat + typeE_bal_cat + 
+                      typeF_flag + cust_outreach_ai + cust_outreach_aii + 
+                      cust_outreach_aiii + cust_outreach_aiv + 
+                      cust_outreach_avi + cust_outreach_avii + 
+                      wf_outreach_flag_chan_i + wf_outreach_flag_chan_ii, 
+                    data = bank_data)
+
+
+##What drives growth in account balance?
+
+bal_growth_model<-glm(balance_change_flag ~ cust_outreach_ai+cust_outreach_aiii+cust_outreach_aiv+
+                        cust_outreach_avi+cust_outreach_avii+cust_outreach_aviii
+                      +channel_combination, data=bank_data, 
+                      family="binomial")
+
+sort(exp(coef(bal_growth_model)), decreasing = TRUE)
+
+
+#growth in number of accounts?
+
+portfolio_model<-glm(portfolio_change_flag~cust_outreach_ai+cust_outreach_aii+ 
+                       cust_outreach_aiii+cust_outreach_aiv+cust_outreach_av+
+                       cust_outreach_avi+cust_outreach_avii
+                     +channel_combination+cust_demographics_ai, data=bank_data, 
+                     family="binomial")
+
+sort(exp(coef(portfolio_model)), decreasing = TRUE)
+
+
+## demographic regressions
+
+bank_data$balance_change_flag_new <- NA
+bank_data$balance_change_flag_new[which(bank_data$balance_change < 0)] <- -1
+bank_data$balance_change_flag_new[which(bank_data$balance_change > 0)] <- 1
+bank_data$balance_change_flag_new[which(bank_data$balance_change == 0)] <- 0
+
+bank_data$portfolio_change_flag_new <- NA
+bank_data$portfolio_change_flag_new[which(bank_data$portfolio_change < 0)] <- -1
+bank_data$portfolio_change_flag_new[which(bank_data$portfolio_change > 0)] <- 1
+bank_data$portfolio_change_flag_new[which(bank_data$portfolio_change == 0)] <- 0
+
+bank_data$balance_change_flag_new<-as.factor(bank_data$balance_change_flag_new)
+bank_data$portfolio_change_flag_new<-as.factor(bank_data$balance_change_flag_new)
+
+
+bank_data$month<-as.integer(bank_data$month)
+
+portfolio_order_model<-polr(portfolio_change_flag_new~cust_demographics_ai+cust_demographics_aii+month, data=bank_data, Hess=TRUE)
+ctable<-coef(summary(portfolio_order_model))
+
+p<-pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+ctable<-cbind(ctable, "p value" = p)
+sort(exp(coef(portfolio_order_model)), decreasing = TRUE)
+
+newdat<-data.frame(cust_demographics_ai = as.factor(rep(0:5, 200)),
+  cust_demographics_aii = as.factor(rep(1:5, 240)),
+  month = rep(1:12, each = 100))
+
+prediction<- cbind(newdat, predict(portfolio_order_model, newdat, type = "probs"))
+
+lnewdat<-melt(prediction, id.vars = c("cust_demographics_ai", "cust_demographics_aii", "month"),
+              variable.name = "Level", value.name = "Probability")
+
+colnames(lnewdat) <- c("cust_demographics_ai","cust_demographics_aii","month","Level","Probability")
+
+labels<-lnewdat
+
+labels$Demo1<-labels$cust_demographics_ai
+labels$Demo2<-labels$cust_demographics_aii
+
+ggplot(subset(labels,Demo1 %in% c("2","3","4")& Demo2 %in% c("3","4","5")), aes(x=month, y=Probability, color = Level))+ 
+  geom_line() + facet_grid(Demo1~Demo2, labeller = "label_both")+ 
+  ggtitle("Demographic Matrix") + scale_x_continuous(breaks=seq(1, 12, 1)) 
+
+ggplot(lnewdat, aes(x=month, y=Probability, color = Level))+ 
+  geom_line() + facet_grid(cust_demographics_ai~cust_demographics_aii, labeller = "label_both")+ 
+  ggtitle("Demographic Matrix") + scale_x_continuous(breaks=seq(1, 12, 1))
+
+#Ordinal Logistic Regression 
+#Account A
+A<-polr(typeA_bal_cat~month+cust_demographics_ai+cust_demographics_aii+
+          cust_outreach_ai+cust_outreach_aii+cust_outreach_aiii+cust_outreach_aiv+
+          cust_outreach_av+cust_outreach_avi+cust_outreach_avii+
+          channel_combination, data=bank_data, Hess=TRUE)
+
+ctableA<-coef(summary(A))
+
+pc<-pnorm(abs(ctableA[, "t value"]), lower.tail=FALSE *2)
+(ctableA <- cbind(ctableA, "p value" = pc))
+
+sort(exp(coef(A)), decreasing = TRUE)
+
+A$coefficients<-exp(coef(A))
+
+coefplot(A, zeroType = 0)
+
+#Account B
+B<-polr(typeB_bal_cat~+cust_demographics_ai+cust_demographics_aii+
+          cust_outreach_ai+cust_outreach_aii+cust_outreach_aiii+cust_outreach_aiv+
+          cust_outreach_avi+cust_outreach_avii+cust_outreach_aviii+
+          channel_combination, data=bank_data, Hess=TRUE)
+
+ctableB<-coef(summary(B))
+
+pcB<-pnorm(abs(ctableB[, "t value"]), lower.tail=FALSE *2)
+(ctableB <- cbind(ctableB, "p value" = pcB))
+
+sort(exp(coef(B)), decreasing = TRUE)
+
+B$coefficients<-exp(coef(B))
+coefplot(B, zeroType = 0)
+
+#Account C
+C<-polr(typeC_bal_cat~month+cust_demographics_ai+cust_demographics_aii+
+          cust_outreach_ai+cust_outreach_aii+
+          cust_outreach_av+cust_outreach_avi+cust_outreach_aviii+
+          channel_combination, data=bank_data, Hess=TRUE)
+
+ctableC<-coef(summary(C))
+
+pcC<-pnorm(abs(ctableC[, "t value"]), lower.tail=FALSE *2)
+(ctableC <- cbind(ctableC, "p value" = pcC))
+
+sort(format(exp(coef(C)), scientific = FALSE),decreasing = TRUE)
+
+C$coefficients<-exp(coef(C))
+coefplot(C, zeroType = 0)
+
+#Account D
+D<-polr(typeD_bal_cat~month+cust_demographics_ai+cust_demographics_aii+
+          cust_outreach_ai+cust_outreach_aiii+
+          cust_outreach_av+cust_outreach_avi+cust_outreach_avii+cust_outreach_aviii+
+          channel_combination, data=bank_data, Hess=TRUE)
+
+ctableD<-coef(summary(D))
+
+pcD<-pnorm(abs(ctableD[, "t value"]), lower.tail=FALSE *2)
+(ctableD <- cbind(ctableD, "p value" = pcD))
+
+sort(format(exp(coef(D)), scientific = FALSE), decreasing = TRUE)
+
+D$coefficients<-exp(coef(D))
+coefplot(D, zeroType = 0)
+
+#Account E
+E<-polr(typeE_bal_cat~month+cust_demographics_ai+cust_demographics_aii+
+          cust_outreach_ai + cust_outreach_aiii+ cust_outreach_aiv+
+          cust_outreach_av+cust_outreach_avi+cust_outreach_avii+cust_outreach_aviii+
+          channel_combination, data=bank_data, Hess=TRUE)
+
+ctableE<-coef(summary(E))
+
+pcE<-pnorm(abs(ctableE[, "t value"]), lower.tail=FALSE *2)
+(ctableE <- cbind(ctableE, "p value" = pcE))
+
+sort(format(exp(coef(E)), scientific = FALSE), decreasing = TRUE)
+
+E$coefficients<-exp(coef(E))
+coefplot(E, zeroType = 0)
+
+#Account F
+F_account<-glm(typeF_flag~month+cust_demographics_ai+cust_demographics_aii +
+                 cust_outreach_ai+cust_outreach_aiv+cust_outreach_av+
+                 cust_outreach_avi+cust_outreach_avii
+               +channel_combination, data=bank_data, 
+               family="binomial")
+
+sort(exp(coef(F_account)), decreasing=TRUE)
+
+F_account$coefficients<-exp(coef(F_account))
+coefplot(F_account, zeroType = 0)
+
+#Account G
+G_account<-glm(typeG_flag~month+cust_demographics_aii+cust_outreach_ai+cust_outreach_aiv+
+                 cust_outreach_avi+cust_outreach_avii+channel_combination, data=bank_data,family="binomial")
+
+sort(exp(coef(G_account)), decreasing=TRUE)
+
+G_account$coefficients<-exp(coef(G_account))
+coefplot(G_account, zeroType = 0)
+
+
+Prob_month1 <- subset(prediction, month == 1)
+Prob_month12 <- subset(prediction, month == 12)
+
+Prob_month1 <- Prob_month1[order(Prob_month1$cust_demographics_ai,Prob_month1$cust_demographics_aii),]
+Prob_month12 <- Prob_month12[order(Prob_month12$cust_demographics_ai,Prob_month12$cust_demographics_aii),]
+
+Prob_month1 <- Prob_month1[!duplicated(Prob_month1),]
+Prob_month12 <- Prob_month12[!duplicated(Prob_month12),]
+
+Prob_month1$decrease_slope <- (Prob_month12$`-1` - Prob_month1$`-1`) / 11
+Prob_month1$increase_slope <- (Prob_month12$`1` - Prob_month1$`1`) / 11
+
+ggplot(Prob_month1) + geom_point(aes(Prob_month1$increase_slope, Prob_month1$decrease_slope))
+
+write.table(Prob_month1,file="output.csv",sep=",",row.names = FALSE)
+
+# Use this output in tableau to create a heatmap
+
+
+```
+
